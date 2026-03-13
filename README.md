@@ -211,3 +211,9 @@ If data is missing when a backtest is requested through the web interface, the b
 - CSV export for the trades table
 - Dark-themed, responsive UI
 - Dockerized for one-command deployment
+
+---
+
+## Acknowledgments
+
+This project was built with the assistance of AI tooling (Cursor / Claude) for code generation and development guidance.
