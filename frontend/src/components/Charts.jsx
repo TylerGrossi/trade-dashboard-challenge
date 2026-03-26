@@ -33,11 +33,43 @@ function fmtDate(dateStr) {
   return `${m}/${d}/${y}`;
 }
 
-function PriceTooltip({ active, payload, label, trades }) {
+function PriceTooltip({ active, payload, label, trades, recommendation }) {
   if (!active || !payload?.length) return null;
   const close = payload[0]?.value;
   const buy = trades.find((t) => t.entry_date === label);
   const sell = trades.find((t) => t.exit_date === label);
+
+  // On the latest bar ("today"), show the backend recommendation instead of
+  // raw BUY/SELL trade markers (entry/exit can be confusing at the boundary).
+  const isLatest = recommendation?.current_date === label;
+  if (isLatest && recommendation) {
+    const action = recommendation.action;
+    const color =
+      action === "BUY" ? "#3fb950" : action === "SELL" ? "#f85149" : "#58a6ff";
+
+    return (
+      <div style={TT}>
+        <div style={{ color: "#e6edf3", fontWeight: 600, marginBottom: 4 }}>{fmtDate(label)}</div>
+        <div style={{ color: "#8b949e" }}>
+          Price: <span style={{ color: "#58a6ff" }}>${close?.toFixed(2)}</span>
+        </div>
+        <div style={{ color, fontWeight: 800, marginTop: 6 }}>
+          RECOMMENDED: {action}
+        </div>
+      </div>
+    );
+  }
+
+  // Strategies close any open position at the end of the window.
+  // If entry and exit happen on the same bar at the same price (0 P&L),
+  // showing both BUY and SELL markers at the end is confusing.
+  const hideSell =
+    Boolean(
+      buy &&
+        sell &&
+        buy.entry_date === sell.exit_date &&
+        Number(buy.entry_price) === Number(sell.exit_price)
+    ) || false;
 
   return (
     <div style={TT}>
@@ -50,7 +82,7 @@ function PriceTooltip({ active, payload, label, trades }) {
           BUY @ ${buy.entry_price.toFixed(2)}
         </div>
       )}
-      {sell && (
+      {sell && !hideSell && (
         <div style={{ color: "#f85149", fontWeight: 600, marginTop: 2 }}>
           SELL @ ${sell.exit_price.toFixed(2)} &nbsp;(
           {sell.pnl >= 0 ? "+" : ""}${sell.pnl.toFixed(2)})
@@ -126,7 +158,17 @@ function EquityTooltip({ active, payload, label }) {
   );
 }
 
-export default function Charts({ priceData, equityCurve, trades, rsi, sma }) {
+export default function Charts({ priceData, equityCurve, trades, rsi, sma, recommendation }) {
+  const latestDate = priceData?.[priceData.length - 1]?.date;
+  const latestClose = priceData?.[priceData.length - 1]?.close;
+
+  const recommendedFill =
+    recommendation?.action === "BUY"
+      ? "#3fb950"
+      : recommendation?.action === "SELL"
+        ? "#f85149"
+        : "#58a6ff";
+
   // Merge SMA data with price data for the overlay chart
   const smaChartData = useMemo(() => {
     if (!sma || !priceData) return null;
@@ -160,7 +202,7 @@ export default function Charts({ priceData, equityCurve, trades, rsi, sma }) {
               interval="preserveStartEnd"
             />
             <YAxis stroke="#8b949e" fontSize={11} domain={["auto", "auto"]} />
-            <Tooltip content={<PriceTooltip trades={trades} />} />
+            <Tooltip content={<PriceTooltip trades={trades} recommendation={recommendation} />} />
             <Area
               type="monotone"
               dataKey="close"
@@ -170,12 +212,48 @@ export default function Charts({ priceData, equityCurve, trades, rsi, sma }) {
               dot={false}
               name="Price"
             />
-            {trades.map((t, i) => (
-              <ReferenceDot key={`b${i}`} x={t.entry_date} y={t.entry_price} r={5} fill="#3fb950" stroke="none" />
-            ))}
-            {trades.map((t, i) => (
-              <ReferenceDot key={`s${i}`} x={t.exit_date} y={t.exit_price} r={5} fill="#f85149" stroke="none" />
-            ))}
+            {trades.map((t, i) => {
+              const zeroLength =
+                t.exit_date === t.entry_date && Number(t.exit_price) === Number(t.entry_price);
+              if (zeroLength) return null;
+              if (latestDate && t.entry_date === latestDate) return null;
+              return (
+                <ReferenceDot
+                  key={`b${i}`}
+                  x={t.entry_date}
+                  y={t.entry_price}
+                  r={5}
+                  fill="#3fb950"
+                  stroke="none"
+                />
+              );
+            })}
+            {trades.map((t, i) => {
+              const zeroLength =
+                t.exit_date === t.entry_date && Number(t.exit_price) === Number(t.entry_price);
+              if (zeroLength) return null;
+              if (latestDate && t.exit_date === latestDate) return null;
+              return (
+                <ReferenceDot
+                  key={`s${i}`}
+                  x={t.exit_date}
+                  y={t.exit_price}
+                  r={5}
+                  fill="#f85149"
+                  stroke="none"
+                />
+              );
+            })}
+
+            {latestDate && latestClose != null && recommendation && (
+              <ReferenceDot
+                x={latestDate}
+                y={latestClose}
+                r={6}
+                fill={recommendedFill}
+                stroke="none"
+              />
+            )}
           </ComposedChart>
         </ResponsiveContainer>
         <div className="chart-legend">

@@ -250,7 +250,7 @@ button[type="submit"]:disabled {
 
 .suggestion-top {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 1rem;
   margin-bottom: 0.75rem;
@@ -260,24 +260,34 @@ button[type="submit"]:disabled {
   font-size: 0.95rem;
   color: var(--text-secondary);
   font-weight: 500;
+  line-height: 1.2;
 }
 
 .suggestion-action {
-  font-size: 1.5rem;
-  font-weight: 900;
+  font-size: 1.05rem;
+  font-weight: 800;
   letter-spacing: 0.02em;
+  padding: 0.35rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
 }
 
 .suggestion-action.profit {
   color: var(--profit);
+  background: rgba(63, 185, 80, 0.14);
+  border-color: rgba(63, 185, 80, 0.35);
 }
 
 .suggestion-action.loss {
   color: var(--loss);
+  background: rgba(248, 81, 73, 0.14);
+  border-color: rgba(248, 81, 73, 0.35);
 }
 
 .suggestion-action.neutral {
   color: var(--text-primary);
+  background: rgba(88, 166, 255, 0.08);
+  border-color: rgba(48, 54, 61, 0.9);
 }
 
 .suggestion-meta {
@@ -286,16 +296,6 @@ button[type="submit"]:disabled {
   gap: 1.25rem;
   flex-wrap: wrap;
   font-size: 0.85rem;
-  margin-bottom: 0.65rem;
-}
-
-.suggestion-confidence {
-  margin-left: auto;
-}
-
-.suggestion-position {
-  color: var(--text-secondary);
-  font-size: 0.9rem;
   margin-bottom: 0.75rem;
 }
 
@@ -304,14 +304,6 @@ button[type="submit"]:disabled {
   font-size: 0.95rem;
   line-height: 1.5;
   margin-bottom: 0.75rem;
-}
-
-.suggestion-history {
-  display: flex;
-  gap: 1.25rem;
-  flex-wrap: wrap;
-  color: var(--text-secondary);
-  font-size: 0.85rem;
 }
 
 /* -------------------------------------------------- */

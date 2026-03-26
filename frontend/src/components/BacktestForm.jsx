@@ -7,8 +7,8 @@ function formatLocalDate(d) {
   return `${y}-${m}-${day}`;
 }
 
-/** Earliest start for “all available history”; Yahoo Finance truncates to what exists. */
-const ALL_TIME_START = "1980-01-01";
+/** Very early start so “All Time” includes the ticker's full available history on Yahoo Finance. */
+const ALL_TIME_START = "1900-01-01";
 
 /**
  * @param {'allTime' | 'last5y' | 'last1y' | 'ytd' | 'last6m'} preset

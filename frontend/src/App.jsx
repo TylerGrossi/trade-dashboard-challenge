@@ -80,10 +80,7 @@ export default function App() {
       {results && (
         <div className="results">
           {results.recommendation && (
-            <SuggestionCard
-              recommendation={results.recommendation}
-              metrics={results.metrics}
-            />
+            <SuggestionCard recommendation={results.recommendation} />
           )}
           <MetricsCards metrics={results.metrics} />
           <Charts
@@ -92,6 +89,7 @@ export default function App() {
             trades={results.trades}
             rsi={results.rsi}
             sma={results.sma}
+            recommendation={results.recommendation}
           />
           <TradesTable trades={results.trades} />
         </div>
