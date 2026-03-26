@@ -4,7 +4,13 @@ from datetime import datetime
 
 import numpy as np
 
-from strategies import rsi_mean_reversion, sma_crossover, price_threshold
+from strategies import (
+    compute_rsi,
+    compute_sma,
+    price_threshold,
+    rsi_mean_reversion,
+    sma_crossover,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -166,6 +172,14 @@ def run_backtest(
     metrics = compute_metrics(trades, closes, dates[0], dates[-1])
     equity_curve = compute_equity_curve(trades, dates, closes)
 
+    recommendation = compute_current_recommendation(
+        strategy_name=strategy_name,
+        dates=dates,
+        closes=closes,
+        params=params,
+        metrics=metrics,
+    )
+
     result = {
         "trades": trades,
         "metrics": metrics,
@@ -190,4 +204,290 @@ def run_backtest(
             for d, s, l in zip(dates, sma_short, sma_long)
         ]
 
+    result["recommendation"] = recommendation
+
     return result
+
+
+def _confidence_from_metrics(metrics: dict) -> int:
+    """
+    Simple confidence proxy from historical metrics.
+
+    NOTE: This is a UI heuristic, not a statistical guarantee.
+    """
+    sharpe = float(metrics.get("sharpe_ratio", 0) or 0)
+    win_prob = float(metrics.get("win_probability", 0) or 0)
+
+    if sharpe >= 1.0:
+        base = 80
+    elif sharpe >= 0.0:
+        base = 55
+    else:
+        base = 25
+
+    if win_prob >= 55:
+        base += 5
+    elif win_prob <= 45:
+        base -= 5
+
+    return max(0, min(100, int(round(base))))
+
+
+def compute_current_recommendation(
+    strategy_name: str,
+    dates: list[str],
+    closes: list[float],
+    params: dict,
+    metrics: dict,
+) -> dict:
+    """
+    Compute what the strategy would suggest on the latest bar.
+
+    - BUY/SELL triggers only if the strategy's entry/exit condition happens
+      on the latest bar.
+    - Otherwise return HOLD, with LONG vs FLAT context.
+    """
+    if not dates or not closes:
+        return {
+            "action": "HOLD",
+            "position": "FLAT",
+            "current_date": None,
+            "current_price": None,
+            "confidence": 0,
+            "reason": "No market data available to compute a recommendation.",
+        }
+
+    last_idx = len(dates) - 1
+    current_date = dates[last_idx]
+    current_price = round(float(closes[last_idx]), 2)
+
+    confidence = _confidence_from_metrics(metrics or {})
+
+    # -----------------------------------------------------------------------
+    # RSI Mean Reversion
+    # -----------------------------------------------------------------------
+    if strategy_name == "rsi_mean_reversion":
+        rsi_period = int(params.get("rsi_period", 7))
+        oversold = int(params.get("oversold", 30))
+        overbought = int(params.get("overbought", 70))
+
+        rsi = compute_rsi(closes, rsi_period)
+        rsi_last = rsi[last_idx]
+
+        position_open = False
+        entry_signal_today = False
+        exit_signal_today = False
+
+        for i in range(len(dates)):
+            if np.isnan(rsi[i]):
+                continue
+
+            if not position_open and rsi[i] < oversold:
+                position_open = True
+                if i == last_idx:
+                    entry_signal_today = True
+            elif position_open and rsi[i] > overbought:
+                position_open = False
+                if i == last_idx:
+                    exit_signal_today = True
+
+        if exit_signal_today:
+            return {
+                "action": "SELL",
+                "position": "LONG",
+                "current_date": current_date,
+                "current_price": current_price,
+                "confidence": confidence,
+                "reason": f"RSI {rsi_last:.1f} entered overbought (> {overbought}) on the latest bar.",
+            }
+        if entry_signal_today:
+            return {
+                "action": "BUY",
+                "position": "FLAT",
+                "current_date": current_date,
+                "current_price": current_price,
+                "confidence": confidence,
+                "reason": f"RSI {rsi_last:.1f} dropped below oversold (< {oversold}) on the latest bar.",
+            }
+
+        position_label = "LONG" if position_open else "FLAT"
+        if np.isnan(rsi_last):
+            reason = "RSI is not defined on the latest bar yet (insufficient lookback)."
+        elif position_open:
+            reason = f"RSI {rsi_last:.1f} is not overbought (> {overbought}); holding the long position."
+        else:
+            reason = (
+                f"RSI {rsi_last:.1f} is between oversold (< {oversold}) and overbought (> {overbought}); waiting for entry."
+            )
+
+        return {
+            "action": "HOLD",
+            "position": position_label,
+            "current_date": current_date,
+            "current_price": current_price,
+            "confidence": confidence,
+            "reason": reason,
+        }
+
+    # -----------------------------------------------------------------------
+    # SMA Crossover
+    # -----------------------------------------------------------------------
+    if strategy_name == "sma_crossover":
+        short_window = int(params.get("short_window", 20))
+        long_window = int(params.get("long_window", 50))
+
+        sma_short = compute_sma(closes, short_window)
+        sma_long = compute_sma(closes, long_window)
+
+        position_open = False
+        entry_signal_today = False
+        exit_signal_today = False
+
+        for i in range(1, len(dates)):
+            short_prev, short_cur = sma_short[i - 1], sma_short[i]
+            long_prev, long_cur = sma_long[i - 1], sma_long[i]
+
+            if np.isnan(short_prev) or np.isnan(long_prev):
+                continue
+
+            if not position_open and short_prev <= long_prev and short_cur > long_cur:
+                position_open = True
+                if i == last_idx:
+                    entry_signal_today = True
+            elif position_open and short_prev >= long_prev and short_cur < long_cur:
+                position_open = False
+                if i == last_idx:
+                    exit_signal_today = True
+
+        short_last = sma_short[last_idx]
+        long_last = sma_long[last_idx]
+        short_prev_last = sma_short[last_idx - 1] if last_idx - 1 >= 0 else float("nan")
+        long_prev_last = sma_long[last_idx - 1] if last_idx - 1 >= 0 else float("nan")
+
+        if exit_signal_today:
+            return {
+                "action": "SELL",
+                "position": "LONG",
+                "current_date": current_date,
+                "current_price": current_price,
+                "confidence": confidence,
+                "reason": (
+                    f"Death-cross on the latest bar (short SMA {short_last:.2f} < long SMA {long_last:.2f})."
+                ),
+            }
+        if entry_signal_today:
+            return {
+                "action": "BUY",
+                "position": "FLAT",
+                "current_date": current_date,
+                "current_price": current_price,
+                "confidence": confidence,
+                "reason": (
+                    f"Golden-cross on the latest bar (short SMA {short_last:.2f} > long SMA {long_last:.2f})."
+                ),
+            }
+
+        position_label = "LONG" if position_open else "FLAT"
+        if np.isnan(short_last) or np.isnan(long_last):
+            reason = "SMA values are not defined on the latest bar yet (insufficient lookback)."
+        elif position_open:
+            reason = (
+                f"Short SMA ({short_last:.2f}) remains above Long SMA ({long_last:.2f}); holding long (no death-cross today)."
+            )
+        else:
+            reason = (
+                f"Waiting for next golden-cross: short SMA ({short_last:.2f}) vs long SMA ({long_last:.2f}). "
+                f"(Prev bar: short {short_prev_last:.2f}, long {long_prev_last:.2f})"
+            )
+
+        return {
+            "action": "HOLD",
+            "position": position_label,
+            "current_date": current_date,
+            "current_price": current_price,
+            "confidence": confidence,
+            "reason": reason,
+        }
+
+    # -----------------------------------------------------------------------
+    # Price Threshold
+    # -----------------------------------------------------------------------
+    if strategy_name == "price_threshold":
+        threshold = float(params.get("threshold", 150))
+        hold_days = int(params.get("hold_days", 10))
+
+        position_open = False
+        position_entry_date = None
+        position_entry_price = None
+        bars_held = 0
+
+        entry_signal_today = False
+        exit_signal_today = False
+
+        for i in range(1, len(dates)):
+            if position_open:
+                bars_held += 1
+                if bars_held >= hold_days:
+                    if i == last_idx:
+                        exit_signal_today = True
+                    position_open = False
+                    position_entry_date = None
+                    position_entry_price = None
+                    bars_held = 0
+                    continue
+
+            if (not position_open) and closes[i - 1] < threshold <= closes[i]:
+                position_open = True
+                position_entry_date = dates[i]
+                position_entry_price = closes[i]
+                bars_held = 0
+                if i == last_idx:
+                    entry_signal_today = True
+
+        if exit_signal_today:
+            return {
+                "action": "SELL",
+                "position": "LONG",
+                "current_date": current_date,
+                "current_price": current_price,
+                "confidence": confidence,
+                "reason": f"Price-threshold holding period reached ({hold_days} days); exiting on the latest bar.",
+            }
+        if entry_signal_today:
+            return {
+                "action": "BUY",
+                "position": "FLAT",
+                "current_date": current_date,
+                "current_price": current_price,
+                "confidence": confidence,
+                "reason": f"Price crossed above ${threshold:g} on the latest bar.",
+            }
+
+        position_label = "LONG" if position_open else "FLAT"
+        if position_open:
+            reason = (
+                f"Currently holding long since {position_entry_date}. "
+                f"Held {bars_held}/{hold_days} days; exit not triggered yet."
+            )
+        else:
+            reason = (
+                f"Waiting for price to cross above ${threshold:g}. Latest close is ${current_price}."
+            )
+
+        return {
+            "action": "HOLD",
+            "position": position_label,
+            "current_date": current_date,
+            "current_price": current_price,
+            "confidence": confidence,
+            "reason": reason,
+        }
+
+    return {
+        "action": "HOLD",
+        "position": "FLAT",
+        "current_date": current_date,
+        "current_price": current_price,
+        "confidence": confidence,
+        "reason": f"Recommendation not available for unknown strategy: {strategy_name}",
+    }

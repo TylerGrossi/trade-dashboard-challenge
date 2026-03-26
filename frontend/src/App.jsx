@@ -3,6 +3,7 @@ import BacktestForm from "./components/BacktestForm";
 import MetricsCards from "./components/MetricsCards";
 import TradesTable from "./components/TradesTable";
 import Charts from "./components/Charts";
+import SuggestionCard from "./components/SuggestionCard";
 import "./App.css";
 
 const API = "/api";
@@ -78,6 +79,12 @@ export default function App() {
 
       {results && (
         <div className="results">
+          {results.recommendation && (
+            <SuggestionCard
+              recommendation={results.recommendation}
+              metrics={results.metrics}
+            />
+          )}
           <MetricsCards metrics={results.metrics} />
           <Charts
             priceData={results.price_data}
