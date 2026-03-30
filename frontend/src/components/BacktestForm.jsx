@@ -7,6 +7,12 @@ function formatLocalDate(d) {
   return `${y}-${m}-${day}`;
 }
 
+function todayLocalDateString() {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return formatLocalDate(today);
+}
+
 /** Very early start so “All Time” includes the ticker's full available history on Yahoo Finance. */
 const ALL_TIME_START = "1900-01-01";
 
@@ -54,7 +60,7 @@ const DATE_RANGE_PRESETS = [
 export default function BacktestForm({ strategies, onSubmit, loading }) {
   const [symbol, setSymbol] = useState("DAVE");
   const [startDate, setStartDate] = useState("2024-01-01");
-  const [endDate, setEndDate] = useState("2026-01-01");
+  const [endDate, setEndDate] = useState(todayLocalDateString);
   const [datePreset, setDatePreset] = useState("custom");
   const [strategy, setStrategy] = useState("rsi_mean_reversion");
   const [params, setParams] = useState({});
@@ -69,17 +75,35 @@ export default function BacktestForm({ strategies, onSubmit, loading }) {
   }, [strategy, strategies]);
 
   const handleParamChange = (name, value) => {
-    setParams((prev) => ({ ...prev, [name]: Number(value) || value }));
+    const n = Number(value);
+    setParams((prev) => ({
+      ...prev,
+      [name]:
+        value === "" || value === "-"
+          ? value
+          : Number.isFinite(n)
+            ? n
+            : prev[name],
+    }));
   };
 
   const handleSubmit = (e) => {
     e.preventDefault();
+    const parameters = { ...params };
+    if (current) {
+      for (const p of current.parameters) {
+        const n = Number(parameters[p.name]);
+        if (!Number.isFinite(n)) {
+          parameters[p.name] = p.default;
+        }
+      }
+    }
     onSubmit({
       symbol,
       start_date: startDate,
       end_date: endDate,
       strategy,
-      parameters: params,
+      parameters,
     });
   };
 
@@ -168,6 +192,7 @@ export default function BacktestForm({ strategies, onSubmit, loading }) {
                 value={params[p.name] ?? p.default}
                 min={p.min}
                 max={p.max}
+                step={p.type === "float" ? "any" : 1}
                 onChange={(e) => handleParamChange(p.name, e.target.value)}
               />
             </div>

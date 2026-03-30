@@ -4,33 +4,30 @@ import MetricsCards from "./components/MetricsCards";
 import TradesTable from "./components/TradesTable";
 import Charts from "./components/Charts";
 import SuggestionCard from "./components/SuggestionCard";
+import { STRATEGY_DEFAULTS } from "./strategyDefaults";
 import "./App.css";
 
 const API = "/api";
 
 export default function App() {
-  const [strategies, setStrategies] = useState({});
+  const [strategies, setStrategies] = useState(STRATEGY_DEFAULTS);
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     fetch(`${API}/strategies`)
-      .then((r) => r.json())
-      .then(setStrategies)
+      .then((r) => {
+        if (!r.ok) throw new Error(`strategies ${r.status}`);
+        return r.json();
+      })
+      .then((data) => {
+        if (data && typeof data === "object" && !Array.isArray(data) && Object.keys(data).length) {
+          setStrategies(data);
+        }
+      })
       .catch(() => {
-        setStrategies({
-          rsi_mean_reversion: {
-            name: "RSI Mean Reversion",
-            description:
-              "Buy when RSI drops below the oversold threshold, sell when RSI rises above the overbought threshold.",
-            parameters: [
-              { name: "rsi_period", label: "RSI Period", default: 7, min: 2, max: 50 },
-              { name: "oversold", label: "Oversold Threshold", default: 30, min: 1, max: 49 },
-              { name: "overbought", label: "Overbought Threshold", default: 70, min: 51, max: 99 },
-            ],
-          },
-        });
+        setStrategies({ ...STRATEGY_DEFAULTS });
       });
   }, []);
 
@@ -89,6 +86,9 @@ export default function App() {
             trades={results.trades}
             rsi={results.rsi}
             sma={results.sma}
+            bollinger={results.bollinger}
+            zscore={results.zscore}
+            zscoreLevels={results.zscore_levels}
             recommendation={results.recommendation}
           />
           <TradesTable trades={results.trades} />

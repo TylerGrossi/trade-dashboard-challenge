@@ -5,11 +5,15 @@ from datetime import datetime
 import numpy as np
 
 from strategies import (
+    bollinger_bands as bollinger_bands_strategy,
+    compute_bollinger_bands,
     compute_rsi,
     compute_sma,
+    compute_zscore,
     price_threshold,
     rsi_mean_reversion,
     sma_crossover,
+    zscore_mean_reversion,
 )
 
 
@@ -153,18 +157,40 @@ def run_backtest(
             overbought=int(params.get("overbought", 70)),
         )
     elif strategy_name == "sma_crossover":
+        short_w = int(params.get("short_window", 20))
+        long_w = int(params.get("long_window", 50))
+        if short_w >= long_w:
+            raise ValueError(
+                "Long SMA window must be greater than short SMA window "
+                f"(got short={short_w}, long={long_w})."
+            )
         trades, sma_short, sma_long = sma_crossover(
             dates,
             closes,
-            short_window=int(params.get("short_window", 20)),
-            long_window=int(params.get("long_window", 50)),
+            short_window=short_w,
+            long_window=long_w,
         )
     elif strategy_name == "price_threshold":
         trades = price_threshold(
             dates,
             closes,
-            threshold=float(params.get("threshold", 150)),
+            threshold=float(params.get("threshold", 9)),
             hold_days=int(params.get("hold_days", 10)),
+        )
+    elif strategy_name == "bollinger_bands":
+        trades, bb_mid, bb_upper, bb_lower = bollinger_bands_strategy(
+            dates,
+            closes,
+            bb_period=int(params.get("bb_period", 20)),
+            num_std=float(params.get("num_std", 2)),
+        )
+    elif strategy_name == "zscore_mean_reversion":
+        trades, z_scores, z_means = zscore_mean_reversion(
+            dates,
+            closes,
+            z_window=int(params.get("z_window", 20)),
+            entry_z=float(params.get("entry_z", 2)),
+            exit_z=float(params.get("exit_z", 0)),
         )
     else:
         raise ValueError(f"Unknown strategy: {strategy_name}")
@@ -203,6 +229,31 @@ def run_backtest(
             }
             for d, s, l in zip(dates, sma_short, sma_long)
         ]
+    elif strategy_name == "bollinger_bands":
+        result["bollinger"] = [
+            {
+                "date": d,
+                "middle": round(m, 2) if not np.isnan(m) else None,
+                "upper": round(u, 2) if not np.isnan(u) else None,
+                "lower": round(lo, 2) if not np.isnan(lo) else None,
+            }
+            for d, m, u, lo in zip(dates, bb_mid, bb_upper, bb_lower)
+        ]
+    elif strategy_name == "zscore_mean_reversion":
+        ez = float(params.get("entry_z", 2))
+        xz = float(params.get("exit_z", 0))
+        result["zscore"] = [
+            {
+                "date": d,
+                "z": round(z, 3) if not np.isnan(z) else None,
+                "mean": round(mn, 2) if not np.isnan(mn) else None,
+            }
+            for d, z, mn in zip(dates, z_scores, z_means)
+        ]
+        result["zscore_levels"] = {
+            "entry_line": round(-abs(ez), 3),
+            "exit_line": round(xz, 3),
+        }
 
     result["recommendation"] = recommendation
 
@@ -336,6 +387,19 @@ def compute_current_recommendation(
         short_window = int(params.get("short_window", 20))
         long_window = int(params.get("long_window", 50))
 
+        if short_window >= long_window:
+            return {
+                "action": "HOLD",
+                "position": "FLAT",
+                "current_date": current_date,
+                "current_price": current_price,
+                "confidence": 0,
+                "reason": (
+                    f"Invalid parameters: long SMA window must be greater than short "
+                    f"(got short={short_window}, long={long_window})."
+                ),
+            }
+
         sma_short = compute_sma(closes, short_window)
         sma_long = compute_sma(closes, long_window)
 
@@ -410,10 +474,158 @@ def compute_current_recommendation(
         }
 
     # -----------------------------------------------------------------------
+    # Bollinger Bands mean reversion
+    # -----------------------------------------------------------------------
+    if strategy_name == "bollinger_bands":
+        bb_period = int(params.get("bb_period", 20))
+        num_std = float(params.get("num_std", 2))
+        _, upper, lower = compute_bollinger_bands(closes, bb_period, num_std)
+
+        position_open = False
+        entry_signal_today = False
+        exit_signal_today = False
+
+        for i in range(len(dates)):
+            if np.isnan(lower[i]) or np.isnan(upper[i]):
+                continue
+
+            if not position_open and closes[i] <= lower[i]:
+                position_open = True
+                if i == last_idx:
+                    entry_signal_today = True
+            elif position_open and closes[i] >= upper[i]:
+                position_open = False
+                if i == last_idx:
+                    exit_signal_today = True
+
+        low_last = lower[last_idx]
+        up_last = upper[last_idx]
+
+        if exit_signal_today:
+            return {
+                "action": "SELL",
+                "position": "LONG",
+                "current_date": current_date,
+                "current_price": current_price,
+                "confidence": confidence,
+                "reason": (
+                    f"Close ${current_price} is at or above the upper Bollinger Band ({up_last:.2f}); mean-reversion exit."
+                ),
+            }
+        if entry_signal_today:
+            return {
+                "action": "BUY",
+                "position": "FLAT",
+                "current_date": current_date,
+                "current_price": current_price,
+                "confidence": confidence,
+                "reason": (
+                    f"Close ${current_price} is at or below the lower Bollinger Band ({low_last:.2f}); mean-reversion entry."
+                ),
+            }
+
+        position_label = "LONG" if position_open else "FLAT"
+        if np.isnan(low_last) or np.isnan(up_last):
+            reason = (
+                "Bollinger Bands are not defined on the latest bar yet (insufficient lookback)."
+            )
+        elif position_open:
+            reason = (
+                f"Holding long: close ${current_price} has not reached the upper band ({up_last:.2f}) yet."
+            )
+        else:
+            reason = (
+                f"Flat: close ${current_price} is between bands (lower {low_last:.2f}, upper {up_last:.2f})."
+            )
+
+        return {
+            "action": "HOLD",
+            "position": position_label,
+            "current_date": current_date,
+            "current_price": current_price,
+            "confidence": confidence,
+            "reason": reason,
+        }
+
+    # -----------------------------------------------------------------------
+    # Z-score mean reversion
+    # -----------------------------------------------------------------------
+    if strategy_name == "zscore_mean_reversion":
+        z_window = int(params.get("z_window", 20))
+        entry_z = float(params.get("entry_z", 2))
+        exit_z = float(params.get("exit_z", 0))
+        entry_level = -abs(entry_z)
+
+        z_scores, _ = compute_zscore(closes, z_window)
+
+        position_open = False
+        entry_signal_today = False
+        exit_signal_today = False
+
+        for i in range(len(dates)):
+            if np.isnan(z_scores[i]):
+                continue
+
+            if not position_open and z_scores[i] <= entry_level:
+                position_open = True
+                if i == last_idx:
+                    entry_signal_today = True
+            elif position_open and z_scores[i] >= exit_z:
+                position_open = False
+                if i == last_idx:
+                    exit_signal_today = True
+
+        z_last = z_scores[last_idx]
+
+        if exit_signal_today:
+            return {
+                "action": "SELL",
+                "position": "LONG",
+                "current_date": current_date,
+                "current_price": current_price,
+                "confidence": confidence,
+                "reason": (
+                    f"Z-score {z_last:.2f} reached the exit level (≥ {exit_z:g}) on the latest bar."
+                ),
+            }
+        if entry_signal_today:
+            return {
+                "action": "BUY",
+                "position": "FLAT",
+                "current_date": current_date,
+                "current_price": current_price,
+                "confidence": confidence,
+                "reason": (
+                    f"Z-score {z_last:.2f} is at or below entry (≤ {entry_level:g}) on the latest bar."
+                ),
+            }
+
+        position_label = "LONG" if position_open else "FLAT"
+        if np.isnan(z_last):
+            reason = "Z-score is not defined on the latest bar yet (insufficient lookback)."
+        elif position_open:
+            reason = (
+                f"Holding long: Z-score {z_last:.2f} has not reached exit (≥ {exit_z:g}) yet."
+            )
+        else:
+            reason = (
+                f"Flat: Z-score {z_last:.2f}; waiting for entry (≤ {entry_level:g})."
+            )
+
+        return {
+            "action": "HOLD",
+            "position": position_label,
+            "current_date": current_date,
+            "current_price": current_price,
+            "confidence": confidence,
+            "reason": reason,
+        }
+
+    # -----------------------------------------------------------------------
     # Price Threshold
     # -----------------------------------------------------------------------
     if strategy_name == "price_threshold":
-        threshold = float(params.get("threshold", 150))
+        threshold = float(params.get("threshold", 9))
         hold_days = int(params.get("hold_days", 10))
 
         position_open = False

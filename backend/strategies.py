@@ -77,7 +77,7 @@ STRATEGIES = {
                 "name": "threshold",
                 "label": "Price Threshold ($)",
                 "type": "float",
-                "default": 150,
+                "default": 9,
                 "min": 1,
                 "max": 10000,
             },
@@ -91,6 +91,65 @@ STRATEGIES = {
             },
         ],
     },
+    "bollinger_bands": {
+        "name": "Bollinger Bands Mean Reversion",
+        "description": (
+            "Buy when the close is at or below the lower Bollinger Band (stretched "
+            "below the mean), sell when the close is at or above the upper band."
+        ),
+        "parameters": [
+            {
+                "name": "bb_period",
+                "label": "BB Period (SMA / std window)",
+                "type": "int",
+                "default": 20,
+                "min": 2,
+                "max": 200,
+            },
+            {
+                "name": "num_std",
+                "label": "Std. deviations",
+                "type": "float",
+                "default": 2,
+                "min": 0.5,
+                "max": 4,
+            },
+        ],
+    },
+    "zscore_mean_reversion": {
+        "name": "Mean Reversion (Z-Score)",
+        "description": (
+            "Buy when the close is cheap vs its rolling mean (Z-score at or below "
+            "-entry), sell when it reverts (Z-score at or above the exit level, "
+            "often 0 = back to the mean)."
+        ),
+        "parameters": [
+            {
+                "name": "z_window",
+                "label": "Lookback (days)",
+                "type": "int",
+                "default": 20,
+                "min": 5,
+                "max": 200,
+            },
+            {
+                "name": "entry_z",
+                "label": "Entry σ (buy when Z ≤ −this)",
+                "type": "float",
+                "default": 2,
+                "min": 0.5,
+                "max": 4,
+            },
+            {
+                "name": "exit_z",
+                "label": "Exit Z (sell when Z ≥ this)",
+                "type": "float",
+                "default": 0,
+                "min": -2,
+                "max": 3,
+            },
+        ],
+    },
 }
 
 
@@ -100,6 +159,32 @@ STRATEGIES = {
 def compute_sma(closes: list[float], window: int) -> list[float]:
     """Simple moving average."""
     return pd.Series(closes).rolling(window=window).mean().tolist()
+
+
+def compute_bollinger_bands(
+    closes: list[float],
+    window: int,
+    num_std: float = 2.0,
+) -> tuple[list[float], list[float], list[float]]:
+    """Middle band (SMA), upper and lower (± num_std rolling standard deviations, ddof=0)."""
+    s = pd.Series(closes)
+    middle = s.rolling(window=window).mean()
+    std = s.rolling(window=window).std(ddof=0)
+    upper = middle + num_std * std
+    lower = middle - num_std * std
+    return middle.tolist(), upper.tolist(), lower.tolist()
+
+
+def compute_zscore(
+    closes: list[float],
+    window: int,
+) -> tuple[list[float], list[float]]:
+    """Rolling Z-score of close vs trailing mean; std uses ddof=0. Returns (z, mean)."""
+    s = pd.Series(closes)
+    mu = s.rolling(window=window).mean()
+    sd = s.rolling(window=window).std(ddof=0)
+    z = (s - mu) / sd.mask((sd == 0) | sd.isna(), other=np.nan)
+    return z.tolist(), mu.tolist()
 
 
 def compute_rsi(closes: list[float], period: int = 14) -> list[float]:
@@ -124,7 +209,7 @@ def compute_rsi(closes: list[float], period: int = 14) -> list[float]:
 def rsi_mean_reversion(
     dates: list[str],
     closes: list[float],
-    rsi_period: int = 14,
+    rsi_period: int = 7,
     oversold: int = 30,
     overbought: int = 70,
 ) -> tuple[list[dict], list[float]]:
@@ -217,10 +302,103 @@ def sma_crossover(
     return trades, sma_short, sma_long
 
 
+def bollinger_bands(
+    dates: list[str],
+    closes: list[float],
+    bb_period: int = 20,
+    num_std: float = 2.0,
+) -> tuple[list[dict], list[float], list[float], list[float]]:
+    """Mean reversion: enter when close is at/below lower band, exit at/above upper band."""
+    middle, upper, lower = compute_bollinger_bands(closes, bb_period, num_std)
+    trades: list[dict] = []
+    position: dict | None = None
+
+    for i in range(len(dates)):
+        if np.isnan(lower[i]) or np.isnan(upper[i]):
+            continue
+
+        if position is None and closes[i] <= lower[i]:
+            position = {"entry_date": dates[i], "entry_price": closes[i]}
+
+        elif position is not None and closes[i] >= upper[i]:
+            pnl = closes[i] - position["entry_price"]
+            trades.append({
+                "entry_date": position["entry_date"],
+                "entry_price": round(position["entry_price"], 2),
+                "exit_date": dates[i],
+                "exit_price": round(closes[i], 2),
+                "pnl": round(pnl, 2),
+                "pnl_pct": round(pnl / position["entry_price"] * 100, 2),
+            })
+            position = None
+
+    if position is not None:
+        pnl = closes[-1] - position["entry_price"]
+        trades.append({
+            "entry_date": position["entry_date"],
+            "entry_price": round(position["entry_price"], 2),
+            "exit_date": dates[-1],
+            "exit_price": round(closes[-1], 2),
+            "pnl": round(pnl, 2),
+            "pnl_pct": round(pnl / position["entry_price"] * 100, 2),
+        })
+
+    return trades, middle, upper, lower
+
+
+def zscore_mean_reversion(
+    dates: list[str],
+    closes: list[float],
+    z_window: int = 20,
+    entry_z: float = 2.0,
+    exit_z: float = 0.0,
+) -> tuple[list[dict], list[float], list[float]]:
+    """
+    Enter when Z <= -entry_z (price below mean by entry_z std devs).
+    Exit when Z >= exit_z (e.g. 0 = mean reversion).
+    """
+    z_scores, rolling_mean = compute_zscore(closes, z_window)
+    trades: list[dict] = []
+    position: dict | None = None
+    entry_level = -abs(float(entry_z))
+
+    for i in range(len(dates)):
+        if np.isnan(z_scores[i]):
+            continue
+
+        if position is None and z_scores[i] <= entry_level:
+            position = {"entry_date": dates[i], "entry_price": closes[i]}
+
+        elif position is not None and z_scores[i] >= float(exit_z):
+            pnl = closes[i] - position["entry_price"]
+            trades.append({
+                "entry_date": position["entry_date"],
+                "entry_price": round(position["entry_price"], 2),
+                "exit_date": dates[i],
+                "exit_price": round(closes[i], 2),
+                "pnl": round(pnl, 2),
+                "pnl_pct": round(pnl / position["entry_price"] * 100, 2),
+            })
+            position = None
+
+    if position is not None:
+        pnl = closes[-1] - position["entry_price"]
+        trades.append({
+            "entry_date": position["entry_date"],
+            "entry_price": round(position["entry_price"], 2),
+            "exit_date": dates[-1],
+            "exit_price": round(closes[-1], 2),
+            "pnl": round(pnl, 2),
+            "pnl_pct": round(pnl / position["entry_price"] * 100, 2),
+        })
+
+    return trades, z_scores, rolling_mean
+
+
 def price_threshold(
     dates: list[str],
     closes: list[float],
-    threshold: float = 150,
+    threshold: float = 9,
     hold_days: int = 10,
 ) -> list[dict]:
     """Price Threshold: buy when price crosses above threshold, hold for N days."""
