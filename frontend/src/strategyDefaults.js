@@ -13,24 +13,6 @@ export const STRATEGY_DEFAULTS = {
       { name: "overbought", label: "Overbought Threshold", type: "int", default: 70, min: 51, max: 99 },
     ],
   },
-  sma_crossover: {
-    name: "SMA Crossover",
-    description:
-      "Buy when the short-period SMA crosses above the long-period SMA (golden cross), sell on the reverse (death cross).",
-    parameters: [
-      { name: "short_window", label: "Short SMA Window", type: "int", default: 20, min: 2, max: 100 },
-      { name: "long_window", label: "Long SMA Window", type: "int", default: 50, min: 5, max: 300 },
-    ],
-  },
-  price_threshold: {
-    name: "Price Threshold",
-    description:
-      "Buy when the price crosses from below to above a fixed threshold, then close the trade after a set number of trading days.",
-    parameters: [
-      { name: "threshold", label: "Price Threshold ($)", type: "float", default: 9, min: 1, max: 10000 },
-      { name: "hold_days", label: "Holding Period (days)", type: "int", default: 10, min: 1, max: 252 },
-    ],
-  },
   bollinger_bands: {
     name: "Bollinger Bands Mean Reversion",
     description:
@@ -38,6 +20,15 @@ export const STRATEGY_DEFAULTS = {
     parameters: [
       { name: "bb_period", label: "BB Period (SMA / std window)", type: "int", default: 20, min: 2, max: 200 },
       { name: "num_std", label: "Std. deviations", type: "float", default: 2, min: 0.5, max: 4 },
+    ],
+  },
+  sma_crossover: {
+    name: "SMA Crossover",
+    description:
+      "Buy when the short-period SMA crosses above the long-period SMA (golden cross), sell on the reverse (death cross).",
+    parameters: [
+      { name: "short_window", label: "Short SMA Window", type: "int", default: 20, min: 2, max: 100 },
+      { name: "long_window", label: "Long SMA Window", type: "int", default: 50, min: 5, max: 300 },
     ],
   },
   zscore_mean_reversion: {
@@ -48,6 +39,15 @@ export const STRATEGY_DEFAULTS = {
       { name: "z_window", label: "Lookback (days)", type: "int", default: 20, min: 5, max: 200 },
       { name: "entry_z", label: "Entry σ (buy when Z ≤ −this)", type: "float", default: 2, min: 0.5, max: 4 },
       { name: "exit_z", label: "Exit Z (sell when Z ≥ this)", type: "float", default: 0, min: -2, max: 3 },
+    ],
+  },
+  price_threshold: {
+    name: "Price Threshold",
+    description:
+      "Buy when the price crosses from below to above a fixed threshold, then close the trade after a set number of trading days.",
+    parameters: [
+      { name: "threshold", label: "Price Threshold ($)", type: "float", default: 150, min: 1, max: 10000 },
+      { name: "hold_days", label: "Holding Period (days)", type: "int", default: 10, min: 1, max: 252 },
     ],
   },
 };

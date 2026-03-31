@@ -157,24 +157,17 @@ def run_backtest(
             overbought=int(params.get("overbought", 70)),
         )
     elif strategy_name == "sma_crossover":
-        short_w = int(params.get("short_window", 20))
-        long_w = int(params.get("long_window", 50))
-        if short_w >= long_w:
-            raise ValueError(
-                "Long SMA window must be greater than short SMA window "
-                f"(got short={short_w}, long={long_w})."
-            )
         trades, sma_short, sma_long = sma_crossover(
             dates,
             closes,
-            short_window=short_w,
-            long_window=long_w,
+            short_window=int(params.get("short_window", 20)),
+            long_window=int(params.get("long_window", 50)),
         )
     elif strategy_name == "price_threshold":
         trades = price_threshold(
             dates,
             closes,
-            threshold=float(params.get("threshold", 9)),
+            threshold=float(params.get("threshold", 150)),
             hold_days=int(params.get("hold_days", 10)),
         )
     elif strategy_name == "bollinger_bands":
@@ -386,19 +379,6 @@ def compute_current_recommendation(
     if strategy_name == "sma_crossover":
         short_window = int(params.get("short_window", 20))
         long_window = int(params.get("long_window", 50))
-
-        if short_window >= long_window:
-            return {
-                "action": "HOLD",
-                "position": "FLAT",
-                "current_date": current_date,
-                "current_price": current_price,
-                "confidence": 0,
-                "reason": (
-                    f"Invalid parameters: long SMA window must be greater than short "
-                    f"(got short={short_window}, long={long_window})."
-                ),
-            }
 
         sma_short = compute_sma(closes, short_window)
         sma_long = compute_sma(closes, long_window)
@@ -625,7 +605,7 @@ def compute_current_recommendation(
     # Price Threshold
     # -----------------------------------------------------------------------
     if strategy_name == "price_threshold":
-        threshold = float(params.get("threshold", 9))
+        threshold = float(params.get("threshold", 150))
         hold_days = int(params.get("hold_days", 10))
 
         position_open = False

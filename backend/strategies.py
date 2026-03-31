@@ -41,56 +41,6 @@ STRATEGIES = {
             },
         ],
     },
-    "sma_crossover": {
-        "name": "SMA Crossover",
-        "description": (
-            "Buy when the short-period SMA crosses above the long-period SMA "
-            "(golden cross), sell on the reverse (death cross)."
-        ),
-        "parameters": [
-            {
-                "name": "short_window",
-                "label": "Short SMA Window",
-                "type": "int",
-                "default": 20,
-                "min": 2,
-                "max": 100,
-            },
-            {
-                "name": "long_window",
-                "label": "Long SMA Window",
-                "type": "int",
-                "default": 50,
-                "min": 5,
-                "max": 300,
-            },
-        ],
-    },
-    "price_threshold": {
-        "name": "Price Threshold",
-        "description": (
-            "Buy when the price crosses from below to above a fixed threshold, "
-            "then close the trade after a set number of trading days."
-        ),
-        "parameters": [
-            {
-                "name": "threshold",
-                "label": "Price Threshold ($)",
-                "type": "float",
-                "default": 9,
-                "min": 1,
-                "max": 10000,
-            },
-            {
-                "name": "hold_days",
-                "label": "Holding Period (days)",
-                "type": "int",
-                "default": 10,
-                "min": 1,
-                "max": 252,
-            },
-        ],
-    },
     "bollinger_bands": {
         "name": "Bollinger Bands Mean Reversion",
         "description": (
@@ -113,6 +63,31 @@ STRATEGIES = {
                 "default": 2,
                 "min": 0.5,
                 "max": 4,
+            },
+        ],
+    },
+    "sma_crossover": {
+        "name": "SMA Crossover",
+        "description": (
+            "Buy when the short-period SMA crosses above the long-period SMA "
+            "(golden cross), sell on the reverse (death cross)."
+        ),
+        "parameters": [
+            {
+                "name": "short_window",
+                "label": "Short SMA Window",
+                "type": "int",
+                "default": 20,
+                "min": 2,
+                "max": 100,
+            },
+            {
+                "name": "long_window",
+                "label": "Long SMA Window",
+                "type": "int",
+                "default": 50,
+                "min": 5,
+                "max": 300,
             },
         ],
     },
@@ -147,6 +122,31 @@ STRATEGIES = {
                 "default": 0,
                 "min": -2,
                 "max": 3,
+            },
+        ],
+    },
+    "price_threshold": {
+        "name": "Price Threshold",
+        "description": (
+            "Buy when the price crosses from below to above a fixed threshold, "
+            "then close the trade after a set number of trading days."
+        ),
+        "parameters": [
+            {
+                "name": "threshold",
+                "label": "Price Threshold ($)",
+                "type": "float",
+                "default": 150,
+                "min": 1,
+                "max": 10000,
+            },
+            {
+                "name": "hold_days",
+                "label": "Holding Period (days)",
+                "type": "int",
+                "default": 10,
+                "min": 1,
+                "max": 252,
             },
         ],
     },
@@ -209,7 +209,7 @@ def compute_rsi(closes: list[float], period: int = 14) -> list[float]:
 def rsi_mean_reversion(
     dates: list[str],
     closes: list[float],
-    rsi_period: int = 7,
+    rsi_period: int = 14,
     oversold: int = 30,
     overbought: int = 70,
 ) -> tuple[list[dict], list[float]]:
@@ -398,7 +398,7 @@ def zscore_mean_reversion(
 def price_threshold(
     dates: list[str],
     closes: list[float],
-    threshold: float = 9,
+    threshold: float = 150,
     hold_days: int = 10,
 ) -> list[dict]:
     """Price Threshold: buy when price crosses above threshold, hold for N days."""
